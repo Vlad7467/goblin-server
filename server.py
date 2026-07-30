@@ -2,7 +2,6 @@ import os
 import uuid
 import subprocess
 import json
-import tempfile
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
@@ -12,7 +11,7 @@ app = FastAPI(title="Goblin AI Server (Stable)")
 
 class GenerateRequest(BaseModel):
     prompt: str
-    model: str = "goblin-anime-uncensored"  # Основная NSFW-модель
+    model: str = "goblin-anime-uncensored"
     quality: str = "ultra"
     width: int = 1024
     height: int = 1024
@@ -23,7 +22,6 @@ async def generate_image(request: GenerateRequest):
         filename = f"{uuid.uuid4()}.png"
         output_path = os.path.join("/tmp", filename)
 
-        # Создаём временный Python-скрипт для вызова goblin
         script_content = f'''
 import asyncio
 from goblin import generate
@@ -41,7 +39,6 @@ async def main():
 
 asyncio.run(main())
 '''
-        # Запускаем скрипт в отдельном процессе с таймаутом 120 секунд
         proc = subprocess.run(
             ["python", "-c", script_content],
             capture_output=True,
@@ -50,29 +47,26 @@ asyncio.run(main())
         )
 
         if proc.returncode != 0:
-            raise Exception(f"Ошибка генерации: {proc.stderr}")
+            raise Exception(f"Ошибка: {proc.stderr}")
 
         if not os.path.exists(output_path):
             raise Exception("Файл не создан")
 
-        return {
-            "success": True,
-            "image_url": f"/images/{filename}"
-        }
+        return {"success": True, "image_url": f"/images/{filename}"}
     except subprocess.TimeoutExpired:
-        raise HTTPException(status_code=504, detail="Генерация слишком долгая")
+        raise HTTPException(504, "Генерация слишком долгая")
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(500, str(e))
 
 @app.get("/images/{filename}")
 async def get_image(filename: str):
-    file_path = os.path.join("/tmp", filename)
-    if not os.path.exists(file_path):
-        raise HTTPException(status_code=404, detail="Изображение не найдено")
-    return FileResponse(file_path, media_type="image/png")
+    path = os.path.join("/tmp", filename)
+    if not os.path.exists(path):
+        raise HTTPException(404, "Not found")
+    return FileResponse(path)
 
 @app.get("/health")
-async def health_check():
+async def health():
     return {"status": "ok"}
 
 if __name__ == "__main__":
