@@ -34,7 +34,7 @@ async def generate_endpoint(req: GenRequest):
         out_path = f"/tmp/{uuid.uuid4()}.png"
         logger.info(f"Начало генерации: {req.model_dump()}, out_path={out_path}")
         
-        # Прямой await (generate – асинхронная функция)
+        # generate – асинхронная функция, просто await
         result = await generate(
             prompt=req.prompt,
             model=req.model,
@@ -45,7 +45,6 @@ async def generate_endpoint(req: GenRequest):
         )
         logger.info(f"Генерация завершена, проверяем файл {out_path}")
         
-        # Если файл не создался, но есть result – сохраняем его
         if not os.path.exists(out_path):
             logger.info(f"Файл не создан, пытаемся сохранить возвращаемое значение типа {type(result)}")
             if result is None:
@@ -54,14 +53,13 @@ async def generate_endpoint(req: GenRequest):
                 with open(out_path, 'wb') as f:
                     f.write(result)
                 logger.info(f"Сохранены байты в {out_path}")
-            elif hasattr(result, 'save'):   # PIL Image
+            elif hasattr(result, 'save'):
                 result.save(out_path)
                 logger.info(f"Сохранён объект с методом save в {out_path}")
             else:
                 logger.error(f"Неизвестный тип результата: {type(result)}")
                 raise HTTPException(500, f"Неизвестный тип результата: {type(result)}")
         
-        # Теперь файл должен существовать
         if not os.path.exists(out_path):
             raise HTTPException(500, f"Файл всё ещё не создан: {out_path}")
         

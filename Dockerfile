@@ -1,6 +1,6 @@
 FROM python:3.11-slim
 
-# Устанавливаем только необходимые системные библиотеки (без шрифтов)
+# Системные зависимости для Playwright и Camoufox
 RUN apt-get update && apt-get install -y \
     curl \
     wget \
@@ -32,8 +32,11 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Устанавливаем браузер Chromium (без автоматической установки системных зависимостей – они уже есть)
+# Установка браузера для Playwright (используется Camoufox)
 RUN playwright install chromium
+
+# Ключевой шаг – установка браузера для Camoufox
+RUN camoufox fetch
 
 COPY server.py .
 
