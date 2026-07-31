@@ -1,5 +1,6 @@
 import os
 import uuid
+import asyncio
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel
@@ -27,7 +28,9 @@ async def generate_endpoint(req: GenRequest):
         raise HTTPException(503, "Goblin-ai недоступен")
     try:
         out_path = f"/tmp/{uuid.uuid4()}.png"
-        await generate(
+        # generate – синхронная функция, запускаем в потоке
+        await asyncio.to_thread(
+            generate,
             prompt=req.prompt,
             model=req.model,
             output=out_path,
