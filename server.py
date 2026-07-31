@@ -1,6 +1,5 @@
 import os
 import uuid
-import asyncio
 import logging
 import traceback
 from fastapi import FastAPI, HTTPException
@@ -8,7 +7,6 @@ from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel
 import uvicorn
 
-# Настройка логирования
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -23,9 +21,9 @@ app = FastAPI(title="Goblin AI Server")
 
 class GenRequest(BaseModel):
     prompt: str
-    model: str = "goblin-anime"      # легче, чем uncensored
-    quality: str = "fast"            # быстрое качество
-    width: int = 512                 # меньше памяти
+    model: str = "goblin-anime"
+    quality: str = "fast"
+    width: int = 512
     height: int = 512
 
 @app.post("/generate")
@@ -36,19 +34,18 @@ async def generate_endpoint(req: GenRequest):
         out_path = f"/tmp/{uuid.uuid4()}.png"
         logger.info(f"Начало генерации: {req.model_dump()}, out_path={out_path}")
         
-        # Запускаем синхронную функцию в потоке и получаем результат
-        result = await asyncio.to_thread(
-            generate,
+        # Прямой await (generate – асинхронная функция)
+        result = await generate(
             prompt=req.prompt,
             model=req.model,
-            output=out_path,           # возможно, библиотека игнорирует этот аргумент
+            output=out_path,
             quality=req.quality,
             width=req.width,
             height=req.height
         )
         logger.info(f"Генерация завершена, проверяем файл {out_path}")
         
-        # Если файл не создался, но result не None – сохраняем result
+        # Если файл не создался, но есть result – сохраняем его
         if not os.path.exists(out_path):
             logger.info(f"Файл не создан, пытаемся сохранить возвращаемое значение типа {type(result)}")
             if result is None:
@@ -57,11 +54,10 @@ async def generate_endpoint(req: GenRequest):
                 with open(out_path, 'wb') as f:
                     f.write(result)
                 logger.info(f"Сохранены байты в {out_path}")
-            elif hasattr(result, 'save'):  # PIL Image или аналоги
+            elif hasattr(result, 'save'):   # PIL Image
                 result.save(out_path)
                 logger.info(f"Сохранён объект с методом save в {out_path}")
             else:
-                # Если не байты и не картинка, попробуем записать как есть (строку?)
                 logger.error(f"Неизвестный тип результата: {type(result)}")
                 raise HTTPException(500, f"Неизвестный тип результата: {type(result)}")
         
@@ -69,10 +65,9 @@ async def generate_endpoint(req: GenRequest):
         if not os.path.exists(out_path):
             raise HTTPException(500, f"Файл всё ещё не создан: {out_path}")
         
-        # Читаем и возвращаем изображение
         with open(out_path, 'rb') as f:
             img_data = f.read()
-        os.remove(out_path)  # удаляем оригинал
+        os.remove(out_path)
         fname = f"{uuid.uuid4()}.png"
         fpath = f"/tmp/{fname}"
         with open(fpath, 'wb') as f:
