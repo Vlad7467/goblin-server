@@ -34,30 +34,45 @@ async def generate_endpoint(req: GenRequest):
         raise HTTPException(503, "Goblin-ai недоступен")
     try:
         out_path = f"/tmp/{uuid.uuid4()}.png"
-        logger.info(f"Начало генерации: {req.dict()}, out_path={out_path}")
+        logger.info(f"Начало генерации: {req.model_dump()}, out_path={out_path}")
         
-        # Запускаем в отдельном потоке (т.к. generate синхронная)
-        await asyncio.to_thread(
+        # Запускаем синхронную функцию в потоке и получаем результат
+        result = await asyncio.to_thread(
             generate,
             prompt=req.prompt,
             model=req.model,
-            output=out_path,
+            output=out_path,           # возможно, библиотека игнорирует этот аргумент
             quality=req.quality,
             width=req.width,
             height=req.height
         )
         logger.info(f"Генерация завершена, проверяем файл {out_path}")
         
+        # Если файл не создался, но result не None – сохраняем result
         if not os.path.exists(out_path):
-            logger.error(f"Файл не создан: {out_path}")
-            # Посмотрим, что есть в /tmp для отладки
-            files = os.listdir('/tmp')
-            logger.info(f"Содержимое /tmp (первые 10): {files[:10]}")
-            raise HTTPException(500, f"Файл не создан (путь: {out_path})")
+            logger.info(f"Файл не создан, пытаемся сохранить возвращаемое значение типа {type(result)}")
+            if result is None:
+                raise HTTPException(500, "Функция generate вернула None и не создала файл")
+            if isinstance(result, bytes):
+                with open(out_path, 'wb') as f:
+                    f.write(result)
+                logger.info(f"Сохранены байты в {out_path}")
+            elif hasattr(result, 'save'):  # PIL Image или аналоги
+                result.save(out_path)
+                logger.info(f"Сохранён объект с методом save в {out_path}")
+            else:
+                # Если не байты и не картинка, попробуем записать как есть (строку?)
+                logger.error(f"Неизвестный тип результата: {type(result)}")
+                raise HTTPException(500, f"Неизвестный тип результата: {type(result)}")
         
+        # Теперь файл должен существовать
+        if not os.path.exists(out_path):
+            raise HTTPException(500, f"Файл всё ещё не создан: {out_path}")
+        
+        # Читаем и возвращаем изображение
         with open(out_path, 'rb') as f:
             img_data = f.read()
-        os.remove(out_path)
+        os.remove(out_path)  # удаляем оригинал
         fname = f"{uuid.uuid4()}.png"
         fpath = f"/tmp/{fname}"
         with open(fpath, 'wb') as f:
@@ -67,7 +82,6 @@ async def generate_endpoint(req: GenRequest):
     
     except Exception as e:
         logger.exception("Ошибка при генерации")
-        # Возвращаем полную ошибку с traceback
         return JSONResponse(
             status_code=500,
             content={"detail": str(e), "traceback": traceback.format_exc()}
