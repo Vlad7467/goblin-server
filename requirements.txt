@@ -3,4 +3,7 @@ uvicorn[standard]==0.24.0
 goblin-ai==2.0.0
 aiohttp==3.8.5
 python-multipart==0.0.6
-camoufox>=0.4.0
+camoufox[full]==0.4.0
+playwright==1.60.0
+opencv-python-headless==4.8.1.78
+numpy==1.24.3
