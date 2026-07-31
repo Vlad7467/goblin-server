@@ -2,17 +2,23 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# Ставим минимальные зависимости, которые есть в репозитории
+# Устанавливаем системные зависимости для браузера
 RUN apt-get update && apt-get install -y \
     libglib2.0-0 \
     libsm6 \
     libxext6 \
     libxrender-dev \
     libgomp1 \
+    wget \
+    gnupg \
     && rm -rf /var/lib/apt/lists/*
 
+# Устанавливаем зависимости Python
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
+
+# Устанавливаем браузерный движок для goblin-ai
+RUN python -c "import camoufox; camoufox.fetch()"
 
 COPY server.py .
 
