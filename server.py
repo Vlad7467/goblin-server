@@ -1,13 +1,23 @@
 import os
 import uuid
-import subprocess
-import json
+import asyncio
+import aiohttp
+import urllib.parse
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel
 import uvicorn
 
-app = FastAPI(title="Goblin AI Server (Stable)")
+# Пытаемся импортировать goblin, но если ошибка — используем резерв
+try:
+    from goblin import generate
+    GOBLIN_AVAILABLE = True
+    print("[OK] Goblin-ai loaded")
+except Exception as e:
+    GOBLIN_AVAILABLE = False
+    print(f"[WARN] Goblin-ai not available: {e}")
+
+app = FastAPI(title="Goblin AI + Pollinations Fallback")
 
 class GenerateRequest(BaseModel):
     prompt: str
@@ -16,58 +26,70 @@ class GenerateRequest(BaseModel):
     width: int = 1024
     height: int = 1024
 
-@app.post("/generate")
+# ---- РЕЗЕРВНЫЙ ГЕНЕРАТОР (POLLINATIONS) ----
+async def generate_pollinations(prompt: str, width=1024, height=1024):
+    safe_prompt = f"{prompt}, photorealistic, 8k, high quality, masterpiece"
+    encoded = urllib.parse.quote(safe_prompt)
+    url = f"https://image.pollinations.ai/prompt/{encoded}?width={width}&height={height}&safe=false&model=flux-realism"
+    async with aiohttp.ClientSession() as session:
+        async with session.get(url, timeout=30) as resp:
+            if resp.status == 200 and 'image' in resp.headers.get('content-type', ''):
+                return await resp.read()
+            return None
+
+# ---- ОСНОВНОЙ ГЕНЕРАТОР (С ПРИОРИТЕТОМ GOBLIN) ----
 async def generate_image(request: GenerateRequest):
-    try:
-        filename = f"{uuid.uuid4()}.png"
-        output_path = os.path.join("/tmp", filename)
+    # Если goblin доступен — пробуем его
+    if GOBLIN_AVAILABLE:
+        try:
+            output_path = f"/tmp/{uuid.uuid4()}.png"
+            await generate(
+                prompt=request.prompt,
+                model=request.model,
+                output=output_path,
+                quality=request.quality,
+                aspect_ratio=f"{request.width}:{request.height}"
+            )
+            if os.path.exists(output_path):
+                with open(output_path, 'rb') as f:
+                    image_data = f.read()
+                os.remove(output_path)
+                return image_data
+        except Exception as e:
+            print(f"[GOBLIN ERROR] {e}")
+            # Если goblin упал — идём в резерв
 
-        script_content = f'''
-import asyncio
-from goblin import generate
-import sys
+    # РЕЗЕРВ: POLLINATIONS
+    print("[INFO] Using Pollinations fallback")
+    return await generate_pollinations(request.prompt, request.width, request.height)
 
-async def main():
-    await generate(
-        prompt="{request.prompt}",
-        model="{request.model}",
-        output="{output_path}",
-        quality="{request.quality}",
-        aspect_ratio="{request.width}:{request.height}"
-    )
-    print("OK")
-
-asyncio.run(main())
-'''
-        proc = subprocess.run(
-            ["python", "-c", script_content],
-            capture_output=True,
-            text=True,
-            timeout=120
-        )
-
-        if proc.returncode != 0:
-            raise Exception(f"Ошибка: {proc.stderr}")
-
-        if not os.path.exists(output_path):
-            raise Exception("Файл не создан")
-
-        return {"success": True, "image_url": f"/images/{filename}"}
-    except subprocess.TimeoutExpired:
-        raise HTTPException(504, "Генерация слишком долгая")
-    except Exception as e:
-        raise HTTPException(500, str(e))
+@app.post("/generate")
+async def generate_endpoint(request: GenerateRequest):
+    image_data = await generate_image(request)
+    if image_data is None:
+        raise HTTPException(500, "Не удалось сгенерировать изображение")
+    
+    # Сохраняем временный файл для отдачи
+    filename = f"{uuid.uuid4()}.png"
+    filepath = f"/tmp/{filename}"
+    with open(filepath, 'wb') as f:
+        f.write(image_data)
+    
+    return JSONResponse({
+        "success": True,
+        "image_url": f"/images/{filename}"
+    })
 
 @app.get("/images/{filename}")
 async def get_image(filename: str):
-    path = os.path.join("/tmp", filename)
-    if not os.path.exists(path):
+    filepath = f"/tmp/{filename}"
+    if not os.path.exists(filepath):
         raise HTTPException(404, "Not found")
-    return FileResponse(path)
+    return FileResponse(filepath)
 
 @app.get("/health")
 async def health():
-    return {"status": "ok"}
+    return {"status": "ok", "goblin_available": GOBLIN_AVAILABLE}
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8000))
