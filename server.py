@@ -5,25 +5,28 @@ from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel
 import uvicorn
 
-# Импортируем как в документации goblin-ai[reference:3]
-from goblin import generate
+try:
+    from goblin import generate
+    GOBLIN_AVAILABLE = True
+except Exception as e:
+    GOBLIN_AVAILABLE = False
+    print(f"[ERROR] Goblin-ai не загрузился: {e}")
 
 app = FastAPI(title="Goblin AI Server")
 
 class GenRequest(BaseModel):
     prompt: str
-    model: str = "goblin-anime-uncensored"  # 18+ модель[reference:4]
+    model: str = "goblin-anime-uncensored"
     quality: str = "ultra"
     width: int = 1024
     height: int = 1024
 
 @app.post("/generate")
 async def generate_endpoint(req: GenRequest):
+    if not GOBLIN_AVAILABLE:
+        raise HTTPException(503, "Goblin-ai недоступен")
     try:
-        # Генерируем уникальное имя файла
         out_path = f"/tmp/{uuid.uuid4()}.png"
-        
-        # Вызываем generate как в примере[reference:5]
         await generate(
             prompt=req.prompt,
             model=req.model,
@@ -32,26 +35,14 @@ async def generate_endpoint(req: GenRequest):
             width=req.width,
             height=req.height
         )
-        
-        # Проверяем, создался ли файл
-        if not os.path.exists(out_path):
-            raise Exception("Файл не создан")
-        
-        # Читаем и возвращаем
         with open(out_path, 'rb') as f:
             img_data = f.read()
         os.remove(out_path)
-        
-        # Сохраняем для отдачи по URL
         fname = f"{uuid.uuid4()}.png"
         fpath = f"/tmp/{fname}"
         with open(fpath, 'wb') as f:
             f.write(img_data)
-        
-        return JSONResponse({
-            "success": True,
-            "image_url": f"/images/{fname}"
-        })
+        return JSONResponse({"success": True, "image_url": f"/images/{fname}"})
     except Exception as e:
         raise HTTPException(500, f"Ошибка: {str(e)}")
 
@@ -64,7 +55,7 @@ async def get_image(fname: str):
 
 @app.get("/health")
 async def health():
-    return {"status": "ok", "goblin_available": True}
+    return {"status": "ok", "goblin_available": GOBLIN_AVAILABLE}
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8000))
