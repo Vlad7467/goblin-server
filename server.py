@@ -28,7 +28,6 @@ async def generate_endpoint(req: GenRequest):
         raise HTTPException(503, "Goblin-ai недоступен")
     try:
         out_path = f"/tmp/{uuid.uuid4()}.png"
-        # generate – синхронная функция, запускаем в потоке
         await asyncio.to_thread(
             generate,
             prompt=req.prompt,
